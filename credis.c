@@ -267,18 +267,19 @@ static int cr_appendstr(cr_buffer *buf, const char *str, int space)
   /* required memory: len, terminating zero and possibly a space */
   reqd = len + 1;
   if (space)
-    reqd++;
+    reqd = reqd +2;
 
   if (reqd > avail)
     if (cr_moremem(buf, reqd - avail + 1))
       return CREDIS_ERR_NOMEM;
 
-  if (space)
-    buf->data[buf->len++] = ' ';
-
   memcpy(buf->data + buf->len, str, len);
   buf->len += len;
-
+  if (space)
+  {
+	  buf->data[buf->len++] = '\r';
+	  buf->data[buf->len++] = '\n';
+  }
   buf->data[buf->len] = '\0';
 
   return 0;
@@ -293,16 +294,27 @@ static int cr_appendstr(cr_buffer *buf, const char *str, int space)
 static int cr_appendstrarray(cr_buffer *buf, int strc, const char **strv, int newline)
 {
   int rc, i;
-
+  int keyLen = 0;
+  char strKeyLen[32];
   for (i = 0; i < strc; i++) {
-    if ((rc = cr_appendstr(buf, strv[i], 1)) != 0)
-      return rc;
+	  keyLen = strlen(strv[i]);
+	  memset(strKeyLen, 0, sizeof(strKeyLen));
+	  strKeyLen[0] = '$';
+	  _itoa(keyLen, ((char*)strKeyLen)+1, 10);
+	  if ((rc = cr_appendstr(buf, strKeyLen, 1))==0)
+	  {
+		  if ((rc = cr_appendstr(buf, strv[i], 1)) != 0)
+		  {
+			  return rc;
+			  if (newline) {
+				  if ((rc = cr_appendstr(buf, "\r\n", 0)) != 0)
+					  return rc;
+			  }
+		  }
+	  }
   }
 
-  if (newline) {
-    if ((rc = cr_appendstr(buf, "\r\n", 0)) != 0)
-      return rc;
-  }
+  
 
   return 0;
 }
@@ -471,15 +483,18 @@ static int cr_receivemultibulk(REDIS rhnd, char *line)
 	  }
     
     blen = atoi(line);
-    if (blen == -1 && *(line-1)!=CR_INLINE)
+    if (blen == -1 && (*(line-1)!=CR_INLINE || *(line-1)==CR_BULK))
       rhnd->reply.multibulk.idxs[i] = -1;
     else {
 	  if (*(line - 1) == CR_INLINE)
 	  {
 		  blen = strlen(line-1);
 	  }
-      /*if ((rc = cr_readln(rhnd, blen, &line, &idx)) != blen)
-        return CREDIS_ERR_PROTOCOL;*/
+	  if (*(line - 1) == CR_BULK)
+	  {
+		if ((rc = cr_readln(rhnd, blen, &line, &idx)) != blen)
+			return CREDIS_ERR_PROTOCOL;
+	  }
 
       rhnd->reply.multibulk.idxs[i] = idx;
     }
@@ -846,9 +861,21 @@ static int cr_multikeybulkcommand(REDIS rhnd, const char *cmd, int keyc,
 {
   cr_buffer *buf = &(rhnd->buf);
   int rc;
-
+  char chCmdLen[64];
+  memset(chCmdLen, 0, sizeof(chCmdLen));
+  chCmdLen[0] = '*';
+  _itoa(keyc + 1, (char*)(chCmdLen)+1, 10);
   buf->len = 0;
-  if ((rc = cr_appendstr(buf, cmd, 0)) != 0)
+  if ((rc = cr_appendstr(buf, chCmdLen, 1)) != 0)
+	  return rc;
+  memset(chCmdLen, 0, sizeof(chCmdLen));
+  chCmdLen[0] = '$';
+  _itoa(strlen(cmd), (char*)(chCmdLen)+1, 10);
+  if ((rc = cr_appendstr(buf, chCmdLen, 1)) != 0)
+  {
+	  return rc;
+  }
+  if ((rc = cr_appendstr(buf, cmd, 1)) != 0)
     return rc;
   if ((rc = cr_appendstrarray(buf, keyc, keyv, 1)) != 0)
     return rc;
@@ -993,7 +1020,8 @@ int credis_type(REDIS rhnd, const char *key)
 
 int credis_keys(REDIS rhnd, const char *pattern, char ***keyv)
 {
-  int rc = cr_sendfandreceive(rhnd, CR_BULK, "KEYS %s\r\n", pattern);
+	int patternLen = strlen(pattern);
+  int rc = cr_sendfandreceive(rhnd, CR_MULTIBULK, "*2\r\n$4\r\nKEYS\r\n$%i\r\n%s\r\n",patternLen, pattern);
 
   if (rc == 0) {
     /* server returns keys as space-separated strings, use multi-bulk 
