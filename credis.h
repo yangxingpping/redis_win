@@ -429,6 +429,10 @@ int credis_sort(REDIS rhnd, const char *query, char ***elementv);
  * MULTI/EXEC/DISCARD Redis atomic transactions
  */
 
+int credis_multi(REDIS rhnd);
+int credis_exec(REDIS rhnd);
+int credis_discard(REDIS rhnd);
+int credis_watch(REDIS rhnd, const char* key);
 
 /*
  * Publish/Subscribe

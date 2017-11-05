@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
   int rc, keyc=5, i;
   double score1, score2;
 
-  redis = credis_connect(NULL, 0, 10000);
+  redis = credis_connect("192.168.199.187", 0, 10000);
   if (redis == NULL) {
     printf("Error connecting to Redis server. Please start server to run tests.\n");
     exit(1);
@@ -96,6 +96,8 @@ int main(int argc, char **argv) {
 
   rc = credis_set(redis, "kalle", "kulax");
   printf("set kalle=kula returned: %d\n", rc);
+
+  rc = credis_watch(redis, "kalle");
 
   rc = credis_get(redis, "kalle", &val);
   printf("get kalle returned: %s\n", val);
