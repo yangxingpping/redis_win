@@ -98,7 +98,10 @@ int main(int argc, char **argv) {
   printf("set kalle=kula returned: %d\n", rc);
 
   rc = credis_watch(redis, "kalle");
-
+  rc = credis_multi(redis);
+  rc = credis_set(redis, "kalle", "yxp");
+  //rc = credis_exec(redis);
+  rc = credis_discard(redis);
   rc = credis_get(redis, "kalle", &val);
   printf("get kalle returned: %s\n", val);
 

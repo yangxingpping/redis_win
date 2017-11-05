@@ -1184,30 +1184,23 @@ int credis_sort(REDIS rhnd, const char *query, char ***elementv)
 
 int credis_multi(REDIS rhnd)
 {
-	int rc = cr_sendfandreceive(rhnd, CR_INT, "MULTI \r\n");
-
-	if (rc == 0 && rhnd->reply.integer == 0)
-		rc = -1;
-
+	char* pStrFmt = "*1\r\n$5\r\nMULTI\r\n";
+	int rc = cr_sendfandreceive(rhnd, CR_INLINE, pStrFmt);
 	return rc;
 }
 
 int credis_exec(REDIS rhnd)
 {
-	int rc = cr_sendfandreceive(rhnd, CR_INT, "EXEC \r\n");
-
-	if (rc == 0 && rhnd->reply.integer == 0)
-		rc = -1;
+	char* pStrFmt = "*1\r\n$4\r\nEXEC\r\n";
+	int rc = cr_sendfandreceive(rhnd, CR_MULTIBULK, pStrFmt);
 
 	return rc;
 }
 
 int credis_discard(REDIS rhnd)
 {
-	int rc = cr_sendfandreceive(rhnd, CR_INT, "DISCARD \r\n");
-
-	if (rc == 0 && rhnd->reply.integer == 0)
-		rc = -1;
+	char* pStrFmt = "*1\r\n$7\r\nDISCARD\r\n";
+	int rc = cr_sendfandreceive(rhnd, CR_INLINE, pStrFmt);
 
 	return rc;
 }
@@ -1216,9 +1209,6 @@ int credis_watch(REDIS rhnd, const char* key)
 {
 	char* pStrFmt = "*2\r\n$5\r\nWATCH\r\n$%i\r\n%s\r\n";
 	int rc = cr_sendfandreceive(rhnd, CR_INLINE,pStrFmt ,strlen(key), key);
-
-	if (rc == 0 && rhnd->reply.integer == 0)
-		rc = -1;
 
 	return rc;
 }
