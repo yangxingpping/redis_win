@@ -29,6 +29,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#pragma comment(lib, "Ws2_32.lib")
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
