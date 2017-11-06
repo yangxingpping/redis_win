@@ -1094,8 +1094,9 @@ int credis_ttl(REDIS rhnd, const char *key)
 
 static int cr_push(REDIS rhnd, int left, const char *key, const char *val)
 {
-  return cr_sendfandreceive(rhnd, CR_INLINE, "%s %s %zu\r\n%s\r\n", 
-                            left==1?"LPUSH":"RPUSH", key, strlen(val), val);
+	char* strFmt = "*3\r\n$5\r\n%s\r\n$%i\r\n%s\r\n$%i\r\n%s\r\n";
+  return cr_sendfandreceive(rhnd, CR_INT, strFmt,
+                            left==1?"LPUSH":"RPUSH", strlen(key),key , strlen(val),val);
 }
 
 int credis_rpush(REDIS rhnd, const char *key, const char *val)
@@ -1161,8 +1162,9 @@ int credis_lrem(REDIS rhnd, const char *key, int count, const char *val)
 
 static int cr_pop(REDIS rhnd, int left, const char *key, char **val)
 {
-  int rc = cr_sendfandreceive(rhnd, CR_BULK, "%s %s\r\n", 
-                              left==1?"LPOP":"RPOP", key);
+	char* strFmt = "*2\r\n$4\r\n%s\r\n$%zu\r\n%s\r\n";
+  int rc = cr_sendfandreceive(rhnd, CR_BULK, strFmt, 
+                              left==1?"LPOP":"RPOP",strlen(key), key);
 
   if (rc == 0 && (*val = rhnd->reply.bulk) == NULL)
     return -1;
