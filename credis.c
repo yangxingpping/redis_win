@@ -1134,8 +1134,9 @@ int credis_lrem(REDIS rhnd, const char *key, int count, const char *val)
 
 static int cr_pop(REDIS rhnd, int left, const char *key, char **val)
 {
-  int rc = cr_sendfandreceive(rhnd, CR_BULK, "%s %s\r\n", 
-                              left==1?"LPOP":"RPOP", key);
+	char* strFmt = "*2\r\n$4\r\n%s\r\n$%zu\r\n%s\r\n";
+  int rc = cr_sendfandreceive(rhnd, CR_BULK, strFmt, 
+                              left==1?"LPOP":"RPOP",strlen(key), key);
 
   if (rc == 0 && (*val = rhnd->reply.bulk) == NULL)
     return -1;
