@@ -1345,8 +1345,9 @@ int credis_slaveof(REDIS rhnd, const char *host, int port)
 
 static int cr_setaddrem(REDIS rhnd, const char *cmd, const char *key, const char *member)
 {
-  int rc = cr_sendfandreceive(rhnd, CR_INT, "%s %s %zu\r\n%s\r\n", 
-                              cmd, key, strlen(member), member);
+	char* cpx = "*3\r\n$%i\r\n%s\r\n$%i\r\n%s\r\n$%i\r\n%s\r\n";
+  int rc = cr_sendfandreceive(rhnd, CR_INT, cpx, 
+                              strlen(cmd), cmd, strlen(key), key, strlen(member), member);
 
   if (rc == 0 && rhnd->reply.integer == 0)
     rc = -1;
