@@ -683,7 +683,10 @@ void credis_close(REDIS rhnd)
 
 REDIS credis_connect(const char *host, int port, int timeout)
 {
-  int fd, rc, flags, yes = 1, use_he = 0;
+#ifndef _WIN32
+	int rc, flags;
+#endif
+  int fd,  yes = 1, use_he = 0;
   struct sockaddr_in sa;  
   struct hostent *he;
   REDIS rhnd;
@@ -772,7 +775,7 @@ REDIS credis_connect(const char *host, int port, int timeout)
     if (cr_selectwritable(fd, timeout) > 0) {
       int err;
       unsigned int len = sizeof(err);
-      if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == -1 || err)
+      if (getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&err, &len) == -1 || err)
         goto error;
     }
     else /* timeout or select error */
@@ -1621,4 +1624,47 @@ int credis_zunionstore(REDIS rhnd, const char *destkey, int keyc, const char **k
                        const int *weightv, REDIS_AGGREGATE aggregate)
 {
   return cr_zstore(rhnd, 0, destkey, keyc, keyv, weightv, aggregate);
+}
+
+int credis_hset(REDIS rhnd, const char* key, const char* field, const char* value)
+{
+	char* cpx = "*4\r\n$4\r\nHSET\r\n$%i\r\n%s\r\n$%i\r\n%s\r\n$%i\r\n%s\r\n";
+	return cr_sendfandreceive(rhnd, CR_INT, cpx,
+		strlen(key), key, strlen(field), field, strlen(value),value);
+}
+
+int credis_hget(REDIS rhnd, const char* key, const char* field, char** value)
+{
+	char* pstrFmt = "*3\r\n$4\r\nHGET\r\n$%i\r\n%s\r\n$%i\r\n%s\r\n";
+	int rc = cr_sendfandreceive(rhnd, CR_BULK, pstrFmt,strlen(key), key, strlen(field),
+		field);
+
+	if (rc == 0 && (*value = rhnd->reply.bulk) == NULL)
+		return -1;
+
+	return rc;
+}
+
+int credis_hexists(REDIS rhnd, const char* key, const char* field)
+{
+	char* pstrFmt = "*3\r\n$7\r\nHEXISTS\r\n$%i\r\n%s\r\n$%i\r\n%s\r\n";
+	int rc = cr_sendfandreceive(rhnd, CR_INT, pstrFmt, strlen(key), key, strlen(field),
+		field);
+
+	if (rc == 0 && rhnd->reply.integer == 0)
+		rc = -1;
+
+	return rc;
+}
+
+int credis_hdel(REDIS rhnd, const char* key, const char* field)
+{
+	char* pstrFmt = "*3\r\n$4\r\nHDEL\r\n$%i\r\n%s\r\n$%i\r\n%s\r\n";
+	int rc = cr_sendfandreceive(rhnd, CR_INT, pstrFmt, strlen(key), key, strlen(field),
+		field);
+
+	if (rc == 0 && rhnd->reply.integer == 0)
+		rc = -1;
+
+	return rc;
 }

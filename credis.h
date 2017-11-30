@@ -412,7 +412,10 @@ int credis_zunionstore(REDIS rhnd, const char *destkey, int keyc, const char **k
  * HGETALL key Return all the fields and associated values in a hash.
  */
 
-
+int credis_hset(REDIS rhnd, const char* key, const char* field, const char* value);
+int credis_hget(REDIS rhnd, const char* key, const char* field, char** value);
+int credis_hexists(REDIS rhnd, const char* key, const char* field);
+int credis_hdel(REDIS rhnd, const char* key, const char* field);
 /*
  * Sorting 
  */
