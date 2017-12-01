@@ -41,6 +41,8 @@
 #endif
 
 #include "credis.h"
+#include "roomInfo.pb.h"
+
 #include <memory>
 #include <string>
 
@@ -79,23 +81,264 @@ void randomize()
 #define DUMMY_DATA "some dummy data string"
 #define LONG_DATA 50000
 
+REDIS redis;
+
+enum opType
+{
+	CGServerStart,
+	CCreateRoom,
+	CJoinRoom
+};
+
+int g_user_id = 10086;
+int g_game_id = 11105101;
+int g_room_id = 1;
+int g_round_count = 10;
+int g_card_count = 2;
+int g_game_rule = 0;
+int g_card_num = 6666;
+int g_cur_room_start_inst = 1;
+int g_cur_room_desk_count = 10;
+std::string g_cur_g_server_ip = "192.168.1.125";
+int	g_cur_g_server_port = 10086;
+
+//获取空闲房间号
+int get_free_room_num()
+{
+	char* p_str_free_room_num = nullptr;
+	int result = credis_lpop(redis, "FreeRoomNumList", &p_str_free_room_num);
+	if (result == 0 && p_str_free_room_num)
+	{
+		return atoi(p_str_free_room_num);
+	}
+	return 0;
+}
+
+//gServer启动
+void gserver_start(int roomID,int gameID)
+{
+	auto result = credis_exists(redis, "startInst");
+	if (result != 0) //说明不存在,直接设置为0
+	{
+		credis_watch(redis, "startInst");
+		credis_multi(redis);
+		credis_set(redis, "startInst", "1");
+		credis_exec(redis);
+	}
+	result = credis_incr(redis, "startInst", &g_cur_room_start_inst);
+	using namespace CardModel;
+	desk_info desk;
+	desk.set_game_id(gameID);
+	desk.set_start_inst(g_cur_room_start_inst);
+	std::string key = std::to_string(long long(roomID))+ ":"+std::to_string(long long(gameID)); //表2的key
+	std::string strSerial = desk.SerializeAsString();
+	result = credis_set(redis, key.c_str(), strSerial.c_str());
+	result = credis_expire(redis, key.c_str(), 30);
+
+	//从表4中获取数据
+	std::string str_room_id = std::to_string(long long(roomID));
+	char* p_desk_started=nullptr;
+	result = credis_spop(redis, str_room_id.c_str(), &p_desk_started);
+	while (result == 0 && p_desk_started!=nullptr)
+	{
+		desk_info d;
+		auto bSucc = d.ParseFromString(std::string(p_desk_started));
+		if (bSucc)
+		{
+			std::string str_room_num = std::to_string(long long(d.card_number()));
+			credis_del(redis, str_room_num.c_str());
+		}
+		p_desk_started = nullptr;
+		result = credis_spop(redis, str_room_id.c_str(), &p_desk_started);
+	}
+	//填充表3中的数据
+	std::string free_room_key = std::to_string(long long(gameID));
+	for (int i = 0; i < g_cur_room_desk_count; ++i)
+	{
+		desk_info desk;
+		desk.set_desk_index(i);
+		desk.set_room_id(roomID);
+		desk.set_server_ip(g_cur_g_server_ip.c_str());
+		desk.set_server_port(g_cur_g_server_port);
+		desk.set_start_inst(g_cur_room_start_inst);
+		desk.set_maxplayer_count(4);
+		desk.set_start_inst(g_cur_room_start_inst);
+		auto str_serial = desk.SerializeAsString();
+		result = credis_lpush(redis, free_room_key.c_str(), strSerial.c_str());
+	}
+}
+
+//创建房间
+void create_room(int userID, int gameID, int roundCount, int cardCount, int gameRule)
+{
+	using namespace CardModel;
+	auto str_game_id = std::to_string(long long(gameID));
+	char* p_desk_info = nullptr;
+	int result = 0;
+	result = credis_lpop(redis, str_game_id.c_str(), &p_desk_info); //从表3中拿出空闲桌子的信息
+	if (result == 0 && p_desk_info != nullptr) //成功获取了桌子的信息
+	{
+		desk_info desk;
+		auto b_succ = desk.ParseFromString(std::string(p_desk_info));
+		if (b_succ)
+		{
+			auto room_id = desk.room_id();
+			auto game_id = desk.game_id();
+			auto str_room_game_key = std::to_string(long long(room_id)) + ":" +
+				std::to_string(long long(game_id));
+			//从表2中获取信息
+			char* p_desk_start_info;
+			result = credis_get(redis, str_room_game_key.c_str(), &p_desk_start_info);
+			if (result == 0 && p_desk_start_info)
+			{
+				desk_info desk_start_info;
+				b_succ = desk_start_info.ParseFromString(std::string(p_desk_start_info));
+				if (b_succ)
+				{
+					if (desk.start_inst() == desk_start_info.start_inst()) //说明当前这个房间可以使用
+					{
+						auto desk_card_num = get_free_room_num();
+						if (desk_card_num == 0) //出错了,获取空闲房间号失败,把桌子返回给freedeskList(表3)
+						{
+							credis_lpush(redis, str_game_id.c_str(), p_desk_info);
+						}
+						else //填充桌子上游戏的相关信息(gameid, roundCount, cardCount, gameRule等)
+						{
+							desk.set_round_count(roundCount);
+							desk.set_card_cost(cardCount);
+							desk.set_card_number(desk_card_num);
+							desk.set_desk_rule(gameRule);
+							auto str_deskinfo_serial = desk.SerializeAsString();
+							auto str_desk_num = std::to_string(long long(desk_card_num));
+							result = credis_set(redis, str_desk_num.c_str(), str_deskinfo_serial.c_str());
+						}
+					}
+				}
+			}
+			else //出现错误
+			{
+
+			}
+		}
+	}
+	else if (result != 0) //redis网络错误
+	{
+
+	}
+	else if (p_desk_info == nullptr) //没有空闲桌子
+	{
+
+	}
+	else
+	{
+
+	}
+}
+
+//加入房间
+void join_room(int userID, int gameID, int cardNum)
+{
+	using namespace CardModel;
+	auto	str_desk_num = std::to_string(long long(cardNum));
+	char*	p_req_desk_info = nullptr;
+	int		result = credis_get(redis, str_desk_num.c_str(), &p_req_desk_info);
+	if (result == 0 && p_req_desk_info)
+	{
+		desk_info desk;
+		bool b_succ = desk.ParseFromString(std::string(p_req_desk_info));
+		if (b_succ)
+		{
+			int room_id = desk.room_id();
+			int game_id = desk.game_id();
+			auto str_room_game_key = std::to_string(long long(room_id)) + ":" +
+				std::to_string(long long(game_id));
+			char* p_room_start_info = nullptr;
+			result = credis_get(redis, str_room_game_key.c_str(), &p_room_start_info);
+			if (result == 0 && p_room_start_info)
+			{
+				desk_info room_start;
+				b_succ = room_start.ParseFromString(std::string(p_room_start_info));
+				if (b_succ)
+				{
+					if (room_start.start_inst() == desk.start_inst()) //成功，返回信息给客户端
+					{
+
+					}
+					else //说明这个桌子的信息是错误的
+					{
+
+					}
+				}
+				else //pb解析失败
+				{
+
+				}
+			}
+			else //出错
+			{
+
+			}
+		}
+		else //pb解析出错
+		{
+
+		}
+	}
+	else //从redis获取数据出错
+	{
+
+	}
+}
+
+void call_func(opType type)
+{
+	switch (type)
+	{
+	case CGServerStart:
+		gserver_start(g_room_id, g_game_id);
+		break;
+	case CCreateRoom:
+		create_room(g_user_id, g_game_id, g_round_count, g_card_count, g_game_rule);
+		break;
+	case CJoinRoom:
+		join_room(g_user_id, g_game_id, g_card_num);
+		break;
+	default:
+		break;
+	}
+}
+
 int main(int argc, char **argv) {
-  REDIS redis;
+  
   REDIS_INFO info;
   char *val, **valv, lstr[50000];
   const char *keyv[] = {"kalle", "adam", "unknown", "bertil", "none"};
   int rc, keyc=5, i;
   double score1, score2;
 
-  redis = credis_connect("192.168.199.187", 0, 10000);
+  redis = credis_connect("192.168.1.125", 6379, 1000);
   if (redis == NULL) {
     printf("Error connecting to Redis server. Please start server to run tests.\n");
     exit(1);
   }
+  /*char* pT = nullptr;
+  rc = credis_get(redis, "notexist", &pT);*/
+  call_func(CGServerStart);
+
+  printf("\n\n************* hash ************************************ \n");
+  rc = credis_hset(redis, "ActiveRooms", "3", "3:3");
+  rc = credis_hget(redis, "ActiveRooms", "3", &val);
+  rc = credis_hexists(redis, "ActiveRooms", "3");
+  rc = credis_hdel(redis, "ActiveRooms", "4");
+
+  int valuexy;
+  rc = credis_incr(redis, "startInst", &valuexy);
+  rc = credis_incr(redis, "startInst", &valuexy);
   printf("\n\n************* get/set ************************************ \n");
 
   rc = credis_set(redis, "kalle", "kulax");
   printf("set kalle=kula returned: %d\n", rc);
+
 
  /* rc = credis_watch(redis, "kalle");
   rc = credis_multi(redis);
@@ -144,8 +387,8 @@ int main(int argc, char **argv) {
   for (i = 0; i < rc; i++)
     printf(" % 2d: %s\n", i, valv[i]);
 
-
   printf("\n\n************* sets ************************************ \n");
+
 
   rc = credis_sadd(redis, "fruits", "banana");
   printf("sadd returned: %d\n", rc);
